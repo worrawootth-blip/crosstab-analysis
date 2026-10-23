@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>วิเคราะห์ Crosstab และไคสแควร์</title>
+<link href="https://fonts.googleapis.com/css2?family=Sarabun:wght@400;600;700&display=swap" rel="stylesheet">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<style>
+:root{--bg:#f4f6fb;--card:#fff;--ink:#1f2937;--mut:#6b7280;--pri:#2563eb;--bd:#e5e7eb;--ok:#047857;--bad:#b91c1c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:'Sarabun',system-ui,sans-serif;line-height:1.6}
+.wrap{max-width:1000px;margin:0 auto;padding:20px 14px 60px}
+h1{font-size:1.6rem;margin:.2em 0}
+.sub{color:var(--mut);margin-bottom:18px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:16px}
+.card h2{font-size:1.1rem;margin:0 0 10px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:6px 14px}
+label.chk{display:flex;gap:8px;align-items:flex-start;cursor:pointer}
+select,input[type=file]{font:inherit;padding:7px;border:1px solid var(--bd);border-radius:8px;background:#fff;max-width:100%}
+.row{display:flex;gap:14px;flex-wrap:wrap;align-items:end}
+.row>div{display:flex;flex-direction:column;gap:4px}
+button{font:inherit;border:0;border-radius:8px;padding:9px 18px;cursor:pointer;font-weight:600}
+.pri{background:var(--pri);color:#fff}.pri:disabled{background:#9ca3af;cursor:not-allowed}
+.sec{background:#e5e7eb;color:var(--ink)}
+.dl{background:#ecfdf5;color:var(--ok);padding:6px 12px;font-size:.9rem}
+.head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px}
+.scroll{overflow-x:auto}
+.cap{width:max-content;min-width:100%;background:#fff;padding:8px}
+.cap h3{margin:0 0 8px;font-size:1.05rem}
+table{border-collapse:collapse;font-size:.95rem}
+th,td{border:1px solid #cbd5e1;padding:6px 12px;text-align:center}
+th{background:#eff6ff}td.l{text-align:left;font-weight:600;background:#f8fafc}
+td.sig{background:#fef3c7;font-weight:700}
+.exp{margin-top:10px;background:#f8fafc;border-left:4px solid var(--pri);padding:10px 14px;border-radius:6px}
+.exp p{margin:.3em 0}
+.msg{color:var(--mut);font-size:.9rem;margin-top:8px}
+.err{color:var(--bad)}
+.chartbox{width:min(900px,100%);height:380px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<h1>📊 วิเคราะห์ Crosstab และสถิติไคสแควร์</h1>
+<div class="sub">อัพโหลดไฟล์ Excel → เลือกตัวแปรและสถิติ → กดประมวลผล</div>
+
+<div class="card">
+  <h2>1) อัพโหลดไฟล์ Excel</h2>
+  <input type="file" id="file" accept=".xlsx,.xls,.csv">
+  <div class="msg" id="fileMsg">แถวแรกของไฟล์ต้องเป็นชื่อตัวแปร (หัวคอลัมน์)</div>
+  <div id="varBox" style="display:none;margin-top:12px">
+    <div class="row">
+      <div><b>จำนวนตัวแปรที่ใช้วิเคราะห์</b><select id="nVar"></select></div>
+      <div id="modeDiv" style="display:none"><b>รูปแบบการจับคู่</b>
+        <select id="mode"><option value="all">ทุกคู่ของตัวแปร</option><option value="first">ตัวแปรที่ 1 เทียบกับตัวแปรอื่น</option></select></div>
+      <div><b>ระดับนัยสำคัญ (α)</b>
+        <select id="alpha"><option>0.05</option><option>0.01</option><option>0.10</option></select></div>
+    </div>
+    <div class="row" id="varSel" style="margin-top:10px"></div>
+    <div class="msg" id="pairInfo"></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>2) เลือกสถิติที่ต้องการวิเคราะห์</h2>
+  <div class="grid" id="stats">
+    <label class="chk"><input type="checkbox" id="ct" checked> ตาราง Crosstab (จำนวน)</label>
+    <label class="chk"><input type="checkbox" id="rp" checked> ร้อยละตามแถว (Row %)</label>
+    <label class="chk"><input type="checkbox" id="cp" checked> ร้อยละตามคอลัมน์ (Column %)</label>
+    <label class="chk"><input type="checkbox" id="tp"> ร้อยละของทั้งหมด (Total %)</label>
+    <label class="chk"><input type="checkbox" id="ex" checked> ค่าคาดหวัง (Expected count)</label>
+    <label class="chk"><input type="checkbox" id="res"> Adjusted Standardized Residual</label>
+    <label class="chk"><input type="checkbox" id="chi" checked> Pearson Chi-square</label>
+    <label class="chk"><input type="checkbox" id="lr"> Likelihood Ratio</label>
+    <label class="chk"><input type="checkbox" id="yf"> Yates / Fisher's Exact (ตาราง 2×2)</label>
+    <label class="chk"><input type="checkbox" id="eff" checked> ขนาดความสัมพันธ์ (Phi, Cramér's V, C)</label>
+    <label class="chk"><input type="checkbox" id="bar" checked> กราฟแท่งเปรียบเทียบ (Clustered)</label>
+    <label class="chk"><input type="checkbox" id="stack" checked> กราฟแท่งซ้อน 100% (Stacked)</label>
+  </div>
+</div>
+
+<div class="row" style="margin-bottom:16px">
+  <button class="pri" id="run" disabled>▶ ประมวลผล</button>
+  <button class="sec" id="reset">⟲ Reset</button>
+</div>
+
+<div id="out"></div>
+</div>
+
+<script>
+const $=id=>document.getElementById(id);
+const S={aoa:null,charts:[]};
+const PAL=['#2563eb','#f59e0b','#10b981','#ef4444','#8b5cf6','#06b6d4','#ec4899','#84cc16','#f97316','#64748b'];
+const esc=s=>String(s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const f=(x,d=2)=>Number(x).toFixed(d);
+const fp=p=>p<0.001?'< .001':f(p,3);
+
+/* ---------- สถิติ ---------- */
+function lgamma(x){const c=[76.18009172947146,-86.50532032941677,24.01409824083091,-1.231739572450155,0.1208650973866179e-2,-0.5395239384953e-5];
+  let y=x,t=x+5.5;t-=(x+0.5)*Math.log(t);let s=1.000000000190015;for(const k of c)s+=k/++y;return -t+Math.log(2.5066282746310005*s/x);}
+function gammaQ(a,x){ // upper regularized
+  if(x<=0)return 1;
+  if(x<a+1){let ap=a,sum=1/a,del=sum;for(let n=0;n<500;n++){ap++;del*=x/ap;sum+=del;if(Math.abs(del)<Math.abs(sum)*1e-14)break;}
+    return 1-sum*Math.exp(-x+a*Math.log(x)-lgamma(a));}
+  let b=x+1-a,c=1e300,d=1/b,h=d;
+  for(let i=1;i<500;i++){const an=-i*(i-a);b+=2;d=an*d+b;if(Math.abs(d)<1e-300)d=1e-300;c=b+an/c;if(Math.abs(c)<1e-300)c=1e-300;d=1/d;const del=d*c;h*=del;if(Math.abs(del-1)<1e-14)break;}
+  return Math.exp(-x+a*Math.log(x)-lgamma(a))*h;}
+const chiP=(x,df)=>gammaQ(df/2,x/2);
+const lf=n=>lgamma(n+1);
+function fisher(a,b,c,d){const r1=a+b,r2=c+d,c1=a+c,c2=b+d,n=r1+r2;
+  const pr=x=>Math.exp(lf(r1)+lf(r2)+lf(c1)+lf(c2)-lf(n)-lf(x)-lf(r1-x)-lf(c1-x)-lf(r2-c1+x));
+  const po=pr(a);let p=0;for(let x=Math.max(0,c1-r2);x<=Math.min(r1,c1);x++){const q=pr(x);if(q<=po*(1+1e-7))p+=q;}
+  return Math.min(1,p);}
+
+/* ---------- อัพโหลดไฟล์ ---------- */
+$('file').addEventListener('change',e=>{
+  const file=e.target.files[0];if(!file)return;
+  const rd=new FileReader();
+  rd.onload=ev=>{try{
+    const wb=XLSX.read(new Uint8Array(ev.target.result),{type:'array'});
+    const aoa=XLSX.utils.sheet_to_json(wb.Sheets[wb.SheetNames[0]],{header:1,defval:''});
+    if(aoa.length<2||aoa[0].length<2)throw new Error('ไฟล์ต้องมีอย่างน้อย 2 คอลัมน์ และมีข้อมูล 1 แถวขึ้นไป');
+    S.aoa=aoa;const mk=Math.min(6,aoa[0].length);
+    $('nVar').innerHTML=Array.from({length:mk-1},(_,i)=>`<option>${i+2}</option>`).join('');
+    $('varSel').innerHTML='';buildVars();
+    $('varBox').style.display='block';$('run').disabled=false;
+    $('fileMsg').className='msg';$('fileMsg').textContent=`✔ อ่านไฟล์ "${file.name}" สำเร็จ: ${aoa.length-1} แถว, ${aoa[0].length} คอลัมน์`;
+  }catch(err){S.aoa=null;$('run').disabled=true;$('fileMsg').className='msg err';$('fileMsg').textContent='❌ '+err.message;}};
+  rd.readAsArrayBuffer(file);
+});
+
+/* ---------- การ์ดผลลัพธ์ + ดาวน์โหลด PNG ---------- */
+function buildVars(){
+  const k=+$('nVar').value,keep=[...document.querySelectorAll('.vs')].map(s=>s.value);
+  const opts=S.aoa[0].map((h,i)=>`<option value="${i}">${esc(h||'คอลัมน์ '+(i+1))}</option>`).join('');
+  $('varSel').innerHTML=Array.from({length:k},(_,i)=>`<div><b>${k===2?(i?'ตัวแปรคอลัมน์ (Column)':'ตัวแปรแถว (Row)'):'ตัวแปรที่ '+(i+1)}</b><select class="vs">${opts}</select></div>`).join('');
+  document.querySelectorAll('.vs').forEach((s,i)=>s.value=keep[i]!==undefined?keep[i]:i);
+  $('modeDiv').style.display=k>2?'flex':'none';updInfo();
+}
+function updInfo(){
+  const k=+$('nVar').value,m=k>2&&$('mode').value==='first'?k-1:k*(k-1)/2;
+  $('pairInfo').textContent=`จะวิเคราะห์ Crosstab/ไคสแควร์ทั้งหมด ${m} คู่ (ขนาดตาราง เช่น 3×3 หรือ 4×4 ขึ้นกับจำนวนกลุ่มในแต่ละตัวแปร)`;
+}
+$('nVar').addEventListener('change',buildVars);
+$('mode').addEventListener('change',updInfo);
+let cardN=0,TAG='';
+function addCard(title,bodyHTML,explainHTML){
+  if(TAG)title+=' ['+TAG+']';
+  const id='cap'+(++cardN);
+  const d=document.createElement('div');d.className='card';
+  d.innerHTML=`<div class="head"><h2>${esc(title)}</h2><button class="dl" data-t="${id}" data-n="${esc(title)}">⬇ ดาวน์โหลด PNG</button></div>
+  <div class="scroll"><div class="cap" id="${id}"><h3>${esc(title)}</h3>${bodyHTML}</div></div>
+  ${explainHTML?`<div class="exp"><b>คำอธิบายผลการวิเคราะห์</b>${explainHTML}</div>`:''}`;
+  $('out').appendChild(d);return id;
+}
+$('out').addEventListener('click',e=>{
+  const b=e.target.closest('.dl');if(!b)return;
+  b.disabled=true;const old=b.textContent;b.textContent='กำลังสร้างภาพ...';
+  html2canvas($(b.dataset.t),{scale:2,backgroundColor:'#ffffff'}).then(cv=>{
+    const a=document.createElement('a');a.download=(b.dataset.n||'result').replace(/[^\wก-๙ ]+/g,'_')+'.png';a.href=cv.toDataURL('image/png');a.click();
+  }).finally(()=>{b.disabled=false;b.textContent=old;});
+});
+
+/* ---------- ประมวลผล ---------- */
+const vn=i=>String(S.aoa[0][i]||'คอลัมน์ '+(i+1));
+$('run').addEventListener('click',()=>{
+  if(!S.aoa)return;
+  const alpha=+$('alpha').value,out=$('out');
+  S.charts.forEach(c=>c.destroy());S.charts=[];out.innerHTML='';cardN=0;TAG='';
+  const idx=[...document.querySelectorAll('.vs')].map(s=>+s.value);
+  if(new Set(idx).size<idx.length){out.innerHTML='<div class="card err">กรุณาเลือกตัวแปรแต่ละช่องให้ไม่ซ้ำกัน</div>';return;}
+  const pl=[];
+  if(idx.length>2&&$('mode').value==='first'){for(let j=1;j<idx.length;j++)pl.push([idx[0],idx[j]]);}
+  else for(let i=0;i<idx.length;i++)for(let j=i+1;j<idx.length;j++)pl.push([idx[i],idx[j]]);
+  const res=[];
+  pl.forEach((q,k)=>{
+    if(pl.length>1)out.insertAdjacentHTML('beforeend',`<h2 style="margin:28px 0 10px;color:var(--pri)">คู่ที่ ${k+1}/${pl.length}: ${esc(vn(q[0]))} × ${esc(vn(q[1]))}</h2>`);
+    const x=analyze(q[0],q[1],alpha);TAG='';if(x)res.push(x);
+  });
+  if(res.length>1){
+    const m=res.length,ab=alpha/m,ns=res.filter(x=>x.sig).length,nb=res.filter(x=>x.p<ab).length;
+    const top=res.reduce((a,x)=>x.V>a.V?x:a,res[0]);
+    const body=`<table><thead><tr><th>คู่ตัวแปร</th><th>ขนาดตาราง</th><th>N</th><th>χ²</th><th>df</th><th>p-value</th><th>Cramér's V</th><th>ผล (α = ${alpha})</th></tr></thead><tbody>${res.map(x=>`<tr><td class="l">${esc(x.rn)} × ${esc(x.cn)}</td><td>${x.r}×${x.c}</td><td>${x.n}</td><td>${f(x.chi2,3)}</td><td>${x.df}</td><td ${x.sig?'class="sig"':''}>${fp(x.p)}</td><td>${f(x.V,3)}</td><td>${x.sig?'สัมพันธ์':'ไม่สัมพันธ์'}</td></tr>`).join('')}</tbody></table>`;
+    addCard('สรุปผลไคสแควร์ทุกคู่ตัวแปร',body,`<p>จากการทดสอบ ${m} คู่ พบความสัมพันธ์อย่างมีนัยสำคัญที่ α = ${alpha} จำนวน <b>${ns}</b> คู่ ส่วนคู่ที่มีความสัมพันธ์แรงที่สุดคือ <b>${esc(top.rn)} × ${esc(top.cn)}</b> (Cramér's V = ${f(top.V,3)})</p>
+      <p>เมื่อทดสอบหลายคู่พร้อมกัน โอกาสเกิดความคลาดเคลื่อนแบบ Type I จะสูงขึ้น หากปรับด้วย Bonferroni (α' = ${alpha}/${m} = ${f(ab,4)}) จะมีคู่ที่ยังมีนัยสำคัญ <b>${nb}</b> คู่</p>`);
+    out.prepend(out.lastElementChild);
+  }
+  out.scrollIntoView({behavior:'smooth'});
+});
+
+function analyze(ri,ci,alpha){
+  const out=$('out');
+  const rn=vn(ri),cn=vn(ci);TAG=rn+' × '+cn;
+  const pairs=S.aoa.slice(1).map(r=>[String(r[ri]).trim(),String(r[ci]).trim()]).filter(p=>p[0]!==''&&p[1]!=='');
+  const srt=a=>[...new Set(a)].sort((x,y)=>x.localeCompare(y,'th',{numeric:true}));
+  const R=srt(pairs.map(p=>p[0])),C=srt(pairs.map(p=>p[1]));
+  if(R.length<2||C.length<2){out.insertAdjacentHTML('beforeend','<div class="card err">'+esc(rn)+' × '+esc(cn)+': แต่ละตัวแปรต้องมีอย่างน้อย 2 กลุ่ม</div>');return null;}
+  if(R.length>20||C.length>20){out.insertAdjacentHTML('beforeend','<div class="card err">'+esc(rn)+' × '+esc(cn)+': มีกลุ่มมากเกินไป (เกิน 20 กลุ่ม) กรุณาเลือกตัวแปรเชิงกลุ่ม</div>');return null;}
+  const r=R.length,c=C.length,n=pairs.length;
+  const O=R.map(()=>C.map(()=>0));
+  pairs.forEach(p=>O[R.indexOf(p[0])][C.indexOf(p[1])]++);
+  const RT=O.map(x=>x.reduce((a,b)=>a+b,0)),CT=C.map((_,j)=>O.reduce((a,x)=>a+x[j],0));
+  const E=O.map((x,i)=>x.map((_,j)=>RT[i]*CT[j]/n));
+  const chi2=O.reduce((s,x,i)=>s+x.reduce((t,o,j)=>t+(o-E[i][j])**2/E[i][j],0),0);
+  const df=(r-1)*(c-1),p=chiP(chi2,df),sig=p<alpha;
+  const minE=Math.min(...E.flat()),lowN=E.flat().filter(v=>v<5).length,lowPct=lowN/(r*c)*100;
+  const is22=r===2&&c===2;
+
+  const mat=(cell,rowT,colT,grand,cls)=>{
+    let h=`<table><thead><tr><th>${esc(rn)} \\ ${esc(cn)}</th>${C.map(x=>`<th>${esc(x)}</th>`).join('')}${rowT?'<th>รวม</th>':''}</tr></thead><tbody>`;
+    R.forEach((a,i)=>{h+=`<tr><td class="l">${esc(a)}</td>${C.map((_,j)=>`<td class="${cls?cls(i,j):''}">${cell(i,j)}</td>`).join('')}${rowT?`<td><b>${rowT(i)}</b></td>`:''}</tr>`;});
+    if(colT)h+=`<tr><td class="l">รวม</td>${C.map((_,j)=>`<td><b>${colT(j)}</b></td>`).join('')}${rowT?`<td><b>${grand}</b></td>`:''}</tr>`;
+    return h+'</tbody></table>';};
+  const pc=(v,t)=>f(v/t*100,1)+'%';
+  const g=id=>$(id).checked;
+
+  out.insertAdjacentHTML('beforeend',`<div class="card"><b>สรุปข้อมูล:</b> ใช้ข้อมูลที่สมบูรณ์ ${n} จาก ${S.aoa.length-1} แถว | ตัวแปรแถว: <b>${esc(rn)}</b> (${r} กลุ่ม) | ตัวแปรคอลัมน์: <b>${esc(cn)}</b> (${c} กลุ่ม) | α = ${alpha}</div>`);
+
+  // หาเซลล์ที่มากที่สุด
+  let mx={v:-1};O.forEach((x,i)=>x.forEach((v,j)=>{if(v>mx.v)mx={v,i,j};}));
+
+  if(g('ct'))addCard('ตาราง Crosstab (จำนวน)',mat((i,j)=>O[i][j],i=>RT[i],j=>CT[j],n),
+    `<p>ตารางแสดงจำนวนผู้ตอบ/ข้อมูลที่ตกอยู่ในแต่ละคู่ของ <b>${esc(rn)}</b> และ <b>${esc(cn)}</b> รวมทั้งสิ้น ${n} ราย</p>
+     <p>กลุ่มที่มีจำนวนมากที่สุดคือ <b>${esc(R[mx.i])}</b> ที่อยู่ในกลุ่ม <b>${esc(C[mx.j])}</b> จำนวน ${mx.v} ราย (${pc(mx.v,n)} ของทั้งหมด)</p>`);
+
+  if(g('rp'))addCard('ร้อยละตามแถว (Row %)',mat((i,j)=>pc(O[i][j],RT[i]),i=>'100%',null,n),
+    `<p>ร้อยละคิดภายในแต่ละกลุ่มของ <b>${esc(rn)}</b> เพื่อดูว่าในแต่ละแถว สัดส่วนกระจายไปยังกลุ่มของ <b>${esc(cn)}</b> อย่างไร</p>
+     <p>ตัวอย่าง: ใน <b>${esc(R[0])}</b> มี ${esc(C.reduce((a,x,j)=>O[0][j]>O[0][a]?j:a,0)!==undefined?C[C.reduce((a,x,j)=>O[0][j]>O[0][a]?j:a,0)]:'')} มากที่สุด (${pc(Math.max(...O[0]),RT[0])})
+     หากสัดส่วนระหว่างแถวต่างกันมาก แสดงว่าอาจมีความสัมพันธ์ระหว่างตัวแปร</p>`);
+
+  if(g('cp'))addCard('ร้อยละตามคอลัมน์ (Column %)',mat((i,j)=>pc(O[i][j],CT[j]),null,null,n),
+    `<p>ร้อยละคิดภายในแต่ละกลุ่มของ <b>${esc(cn)}</b> เพื่อดูองค์ประกอบของ <b>${esc(rn)}</b> ในแต่ละคอลัมน์ หากแต่ละคอลัมน์มีสัดส่วนใกล้เคียงกัน แสดงว่าตัวแปรมีแนวโน้มไม่สัมพันธ์กัน</p>`);
+
+  if(g('tp'))addCard('ร้อยละของทั้งหมด (Total %)',mat((i,j)=>pc(O[i][j],n),i=>pc(RT[i],n),j=>pc(CT[j],n),'100%'),
+    `<p>แต่ละเซลล์คือสัดส่วนของข้อมูลทั้งหมด ${n} ราย ที่อยู่ในเซลล์นั้น ใช้ดูภาพรวมการกระจายตัวของข้อมูล</p>`);
+
+  if(g('ex'))addCard('ค่าคาดหวัง (Expected Count)',mat((i,j)=>f(E[i][j]),null,null,n),
+    `<p>คือจำนวนที่คาดว่าจะพบในแต่ละเซลล์ หาก <b>${esc(rn)}</b> และ <b>${esc(cn)}</b> ไม่มีความสัมพันธ์กัน (คำนวณจาก ผลรวมแถว × ผลรวมคอลัมน์ ÷ N)</p>
+     <p>ข้อตกลงเบื้องต้นของไคสแควร์: ค่าคาดหวังควรมากกว่า 5 ในอย่างน้อย 80% ของเซลล์ และไม่มีเซลล์ใดต่ำกว่า 1 —
+     ข้อมูลนี้มีเซลล์ที่ค่าคาดหวังต่ำกว่า 5 จำนวน ${lowN} จาก ${r*c} เซลล์ (${f(lowPct,1)}%), ค่าต่ำสุด = ${f(minE)}
+     ${lowPct>20||minE<1?'<b class="err">→ ไม่เป็นไปตามข้อตกลง ควรระวังการตีความ ควรรวมกลุ่ม หรือใช้ Fisher\'s Exact Test (กรณี 2×2)</b>':'<b style="color:var(--ok)">→ เป็นไปตามข้อตกลง</b>'}</p>`);
+
+  const Z=O.map((x,i)=>x.map((o,j)=>(o-E[i][j])/Math.sqrt(E[i][j]*(1-RT[i]/n)*(1-CT[j]/n))));
+  if(g('res')){
+    const hi=[];Z.forEach((x,i)=>x.forEach((z,j)=>{if(Math.abs(z)>1.96)hi.push(`<b>${esc(R[i])}</b> × <b>${esc(C[j])}</b> (z = ${f(z)}, ${z>0?'มากกว่า':'น้อยกว่า'}ที่คาด)`);}));
+    addCard('Adjusted Standardized Residual',mat((i,j)=>f(Z[i][j]),null,null,n,(i,j)=>Math.abs(Z[i][j])>1.96?'sig':''),
+    `<p>ใช้ดูว่าเซลล์ใดทำให้เกิดความสัมพันธ์ เซลล์ที่ไฮไลต์ (|z| &gt; 1.96) แตกต่างจากค่าคาดหวังอย่างมีนัยสำคัญที่ระดับ .05
+    (ค่าบวก = พบมากกว่าที่คาด, ค่าลบ = พบน้อยกว่าที่คาด)</p>
+    <p>${hi.length?'เซลล์ที่แตกต่างอย่างมีนัยสำคัญ: '+hi.join('; '):'ไม่มีเซลล์ใดที่แตกต่างจากค่าคาดหวังอย่างมีนัยสำคัญ'}</p>`);}
+
+  if(g('chi')||g('lr')||g('yf')){
+    const rows=[];
+    if(g('chi'))rows.push(['Pearson Chi-square',f(chi2,3),df,fp(p)]);
+    if(g('lr')){const G=2*O.reduce((s,x,i)=>s+x.reduce((t,o,j)=>t+(o>0?o*Math.log(o/E[i][j]):0),0),0);rows.push(['Likelihood Ratio',f(G,3),df,fp(chiP(G,df))]);}
+    let yTxt='';
+    if(g('yf')){
+      if(is22){const y=O.reduce((s,x,i)=>s+x.reduce((t,o,j)=>t+(Math.max(0,Math.abs(o-E[i][j])-0.5))**2/E[i][j],0),0);
+        rows.push(['Continuity Correction (Yates)',f(y,3),1,fp(chiP(y,1))]);
+        rows.push(["Fisher's Exact Test (2 ด้าน)",'-','-',fp(fisher(O[0][0],O[0][1],O[1][0],O[1][1]))]);}
+      else yTxt='<p class="err">หมายเหตุ: Yates และ Fisher\'s Exact ใช้ได้กับตาราง 2×2 เท่านั้น (ตารางนี้คือ '+r+'×'+c+')</p>';}
+    const body=`<table><thead><tr><th>การทดสอบ</th><th>ค่าสถิติ</th><th>df</th><th>Sig. (p-value)</th></tr></thead><tbody>${rows.map(x=>`<tr><td class="l">${x[0]}</td><td>${x[1]}</td><td>${x[2]}</td><td ${x[3]!=='-'&&(x[3]==='< .001'||+x[3]<alpha)?'class="sig"':''}>${x[3]}</td></tr>`).join('')}</tbody></table>
+      <div style="margin-top:6px;font-size:.9rem">N = ${n}; เซลล์ที่ค่าคาดหวัง &lt; 5: ${lowN} เซลล์ (${f(lowPct,1)}%); ค่าคาดหวังต่ำสุด = ${f(minE)}</div>`;
+    addCard('ผลการทดสอบไคสแควร์ (Chi-square Tests)',body,
+    `<p><b>สมมติฐาน:</b> H₀ : ${esc(rn)} และ ${esc(cn)} ไม่มีความสัมพันธ์กัน | H₁ : ${esc(rn)} และ ${esc(cn)} มีความสัมพันธ์กัน</p>
+     <p>ผล Pearson χ²(${df}, N = ${n}) = ${f(chi2,3)}, p ${p<0.001?'< .001':'= '+f(p,3)} ${sig
+       ?`ซึ่งน้อยกว่า α = ${alpha} จึง<b style="color:var(--ok)">ปฏิเสธ H₀</b> สรุปได้ว่า <b>${esc(rn)}</b> มีความสัมพันธ์กับ <b>${esc(cn)}</b> อย่างมีนัยสำคัญทางสถิติ`
+       :`ซึ่งมากกว่า α = ${alpha} จึง<b class="err">ไม่สามารถปฏิเสธ H₀</b> สรุปได้ว่ายังไม่พบความสัมพันธ์ระหว่าง <b>${esc(rn)}</b> กับ <b>${esc(cn)}</b> อย่างมีนัยสำคัญทางสถิติ`}</p>
+     ${lowPct>20||minE<1?`<p class="err">⚠ มีเซลล์ที่ค่าคาดหวังต่ำกว่า 5 เกิน 20% จึงควรระวังในการตีความ${is22?' และควรพิจารณา Fisher\'s Exact Test':''}</p>`:''}${yTxt}`);}
+
+  if(g('eff')){
+    const phi=Math.sqrt(chi2/n),C0=Math.sqrt(chi2/(chi2+n)),V=Math.sqrt(chi2/(n*Math.min(r-1,c-1)));
+    const lvl=v=>v<0.1?'น้อยมาก (แทบไม่มี)':v<0.3?'น้อย':v<0.5?'ปานกลาง':'มาก';
+    addCard('ขนาดความสัมพันธ์ (Symmetric Measures)',
+      `<table><thead><tr><th>ค่าสถิติ</th><th>ค่า</th><th>Approx. Sig.</th></tr></thead><tbody>
+      <tr><td class="l">Phi (φ)</td><td>${f(phi,3)}</td><td>${fp(p)}</td></tr>
+      <tr><td class="l">Cramér's V</td><td>${f(V,3)}</td><td>${fp(p)}</td></tr>
+      <tr><td class="l">Contingency Coefficient (C)</td><td>${f(C0,3)}</td><td>${fp(p)}</td></tr></tbody></table>`,
+    `<p>ไคสแควร์บอกเพียงว่า "มีความสัมพันธ์หรือไม่" แต่ Cramér's V บอก "ความแรง" ของความสัมพันธ์ (0 = ไม่สัมพันธ์, 1 = สัมพันธ์สมบูรณ์)</p>
+     <p>Cramér's V = ${f(V,3)} แสดงว่าความสัมพันธ์อยู่ในระดับ <b>${lvl(V)}</b> (เกณฑ์โดยประมาณสำหรับ df* = 1: &lt; .10 น้อยมาก, .10–.29 น้อย, .30–.49 ปานกลาง, ≥ .50 มาก)
+     ${sig?'':'อย่างไรก็ตาม ผลการทดสอบไม่มีนัยสำคัญ จึงไม่ควรสรุปว่ามีความสัมพันธ์ในประชากร'}</p>
+     <p>Phi ใช้เหมาะกับตาราง 2×2 ส่วน Cramér's V ใช้ได้กับตารางทุกขนาด</p>`);}
+
+  const mkChart=(title,stacked)=>{
+    const body='<div class="chartbox"><canvas></canvas></div>';
+    const id=addCard(title,body,stacked
+      ?`<p>กราฟแสดงสัดส่วน (%) ของ <b>${esc(cn)}</b> ภายในแต่ละกลุ่มของ <b>${esc(rn)}</b> หากความยาวของแต่ละสีในแท่งต่างๆ ไม่เท่ากันมาก แสดงว่าตัวแปรอาจมีความสัมพันธ์กัน${sig?' ซึ่งสอดคล้องกับผลไคสแควร์ที่มีนัยสำคัญ':' แต่ผลไคสแควร์ไม่มีนัยสำคัญ ความแตกต่างที่เห็นอาจเกิดจากความแปรปรวนของตัวอย่าง'}</p>`
+      :`<p>กราฟเปรียบเทียบจำนวนในแต่ละกลุ่มของ <b>${esc(cn)}</b> ภายใต้แต่ละกลุ่มของ <b>${esc(rn)}</b> ใช้ดูรูปแบบการกระจายและเปรียบเทียบขนาดกลุ่มได้อย่างรวดเร็ว</p>`);
+    const cv=$(id).querySelector('canvas');
+    S.charts.push(new Chart(cv,{type:'bar',data:{labels:R,datasets:C.map((cl,j)=>({label:cn+': '+cl,backgroundColor:PAL[j%PAL.length],
+      data:R.map((_,i)=>stacked?+(O[i][j]/RT[i]*100).toFixed(1):O[i][j])}))},
+      options:{responsive:true,maintainAspectRatio:false,animation:false,
+        plugins:{title:{display:true,text:`${rn} × ${cn}`,font:{size:15,family:'Sarabun'}},legend:{labels:{font:{family:'Sarabun'}}}},
+        scales:{x:{stacked,title:{display:true,text:rn,font:{family:'Sarabun'}}},
+                y:{stacked,beginAtZero:true,max:stacked?100:undefined,title:{display:true,text:stacked?'ร้อยละ (%)':'จำนวน',font:{family:'Sarabun'}}}}}}));
+  };
+  if(g('bar'))mkChart('กราฟแท่งเปรียบเทียบ (Clustered Bar)',false);
+  if(g('stack'))mkChart('กราฟแท่งซ้อน 100% (Stacked Bar)',true);
+
+  return {rn,cn,r,c,n,chi2,df,p,sig,V:Math.sqrt(chi2/(n*Math.min(r-1,c-1)))};
+}
+
+/* ---------- Reset ---------- */
+$('reset').addEventListener('click',()=>{
+  S.charts.forEach(c=>c.destroy());S.charts=[];S.aoa=null;cardN=0;
+  $('out').innerHTML='';$('file').value='';$('varBox').style.display='none';TAG='';
+  $('varSel').innerHTML='';$('nVar').innerHTML='';$('mode').selectedIndex=0;$('alpha').selectedIndex=0;
+  $('run').disabled=true;$('fileMsg').className='msg';$('fileMsg').textContent='แถวแรกของไฟล์ต้องเป็นชื่อตัวแปร (หัวคอลัมน์)';
+  const def=['ct','rp','cp','ex','chi','eff','bar','stack'];
+  document.querySelectorAll('#stats input').forEach(i=>i.checked=def.includes(i.id));
+  window.scrollTo({top:0,behavior:'smooth'});
+});
+</script>
+</body>
+</html>
